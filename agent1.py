@@ -85,7 +85,7 @@ class CustomPlayer(Agent):
         size = self.get_grid_size()
         
         # Check path development
-        if self.player_number == 1:  # Vertical connection (top-bottom)
+        if self.player_number == 1:  # Vertical connection
             # Check connection to edges
             has_top = any(self.get_hex([0, y]) == self.player_number 
                          for y in range(size))
@@ -96,7 +96,7 @@ class CustomPlayer(Agent):
             # Bonus for progress towards goal
             score += (size - abs(move[0] - size//2)) * 2
             
-        else:  # Horizontal connection (left-right)
+        else:  # Horizontal connection 
             # Check connection to edges
             has_left = any(self.get_hex([x, 0]) == self.player_number 
                           for x in range(size))
@@ -112,7 +112,7 @@ class CustomPlayer(Agent):
             if self.get_hex(neighbor) == self.player_number:
                 score += 5
             elif self.get_hex(neighbor) == self.adv_number:
-                score += 2  # Small bonus for blocking opponent
+                score += 2  # bonus for blocking opponent
                 
         return score
 
