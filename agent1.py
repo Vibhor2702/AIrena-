@@ -346,7 +346,7 @@ class CustomPlayer(Agent):
                     break
                     
             if left_connected and right_connected:
-                blocking_score += 5  # Higher score for blocking a potential path
+                blocking_score += 10  # High value for blocking a path
                 
         else:  # We're horizontal, opponent is vertical
             # Check if this position is on opponent's potential path
@@ -354,6 +354,7 @@ class CustomPlayer(Agent):
             bottom_connected = False
             
             # Check upward
+            x, y = move
             nx = x
             ny = y
             while nx > 0:
@@ -376,12 +377,177 @@ class CustomPlayer(Agent):
                     break
                     
             if top_connected and bottom_connected:
-                blocking_score += 5  # Higher score for blocking a potential path
-                
-        # Reset the move
+                blocking_score += 10  # High value for blocking a path
+        
+        # Reset board
         self.set_hex(0, move)
         
-        return blocking_score
+        return blocking_score + opp_connectivity * 2
+
+    def _evaluate_position(self, move):
+        """Evaluate position with optimizations for all board sizes"""
+        score = 0
+        size = self.size
+        
+        # Edge connection analysis
+        if self.player_number == 1:  # Vertical connection
+            # Check connection to edges
+            edge_value = 15 if size >= 9 else 12
+            edge_score = (int(self.edge_connections[1][0]) + int(self.edge_connections[1][1])) * edge_value
+            score += edge_score
+            
+            # Path quality evaluation
+            if self.edge_connections[1][0] and not self.edge_connections[1][1]:
+                # Top connected - evaluate path toward bottom
+                path_quality = self._evaluate_path_quality(move, True, False)  # Downward
+                score += path_quality * 4
+            elif self.edge_connections[1][1] and not self.edge_connections[1][0]:
+                # Bottom connected - evaluate path toward top
+                path_quality = self._evaluate_path_quality(move, True, True)  # Upward
+                score += path_quality * 4
+            
+        else:  # Horizontal connection
+            # Check connection to edges with size adaptations
+            edge_value = 18 if size >= 9 else 15 if size >= 7 else 12
+            edge_score = (int(self.edge_connections[2][0]) + int(self.edge_connections[2][1])) * edge_value
+            score += edge_score
+            
+            # Path quality evaluation
+            if self.edge_connections[2][0] and not self.edge_connections[2][1]:
+                # Left connected - evaluate path toward right
+                path_quality = self._evaluate_path_quality(move, False, False)  # Rightward
+                score += path_quality * (5 if size >= 9 else 4)
+            elif self.edge_connections[2][1] and not self.edge_connections[2][0]:
+                # Right connected - evaluate path toward left
+                path_quality = self._evaluate_path_quality(move, False, True)  # Leftward
+                score += path_quality * 4
+            
+        # Size-specific position bonuses
+        if size <= 7:  # Small boards
+            # Value central positions more
+            center_dist = abs(move[0] - size//2) + abs(move[1] - size//2)
+            center_bonus = (2*size - center_dist) / 2
+            score += center_bonus
+        elif size <= 9:  # Medium boards
+            # Balance between center and edges
+            if self.player_number == 1:  # Vertical
+                col_centrality = (size - abs(move[1] - size//2)) * 0.8
+                score += col_centrality
+            else:  # Horizontal
+                row_centrality = (size - abs(move[0] - size//2)) * 0.8
+                score += row_centrality
+        else:  # Large boards
+            # Focus more on direct paths than center
+            if self.player_number == 1:  # Vertical
+                # For vertical - pick good stable columns
+                good_cols = [size//3, size//2, 2*size//3]
+                if move[1] in good_cols:
+                    score += 3
+            else:  # Horizontal
+                # For horizontal - pick good stable rows
+                good_rows = [size//3, size//2, 2*size//3]
+                if move[0] in good_rows:
+                    score += 3
+        
+        # Connectivity evaluation
+        for neighbor in self.neighbors(move):
+            if self.get_hex(neighbor) == self.player_number:
+                score += 5
+                # Check for ladder/bridge formations (two connected neighbors that aren't connected to each other)
+                for n1 in self.neighbors(move):
+                    for n2 in self.neighbors(move):
+                        if n1 != n2 and self.get_hex(n1) == self.player_number and self.get_hex(n2) == self.player_number:
+                            if n2 not in self.neighbors(n1):  # Not directly connected
+                                score += 3  # Bonus for forming a bridge
+            elif self.get_hex(neighbor) == self.adv_number:
+                score += 1  # Small bonus for blocking opponent
+                
+        return score
+        
+    def _evaluate_path_quality(self, move, is_vertical, reverse_direction):
+        """Evaluate path quality in specified direction"""
+        x, y = move
+        
+        # Set direction based on parameters
+        if is_vertical:
+            dx = -1 if reverse_direction else 1
+            dy = 0
+        else:
+            dx = 0
+            dy = -1 if reverse_direction else 1
+            
+        path_score = 0
+        nx, ny = x, y
+        max_steps = self.size
+        steps = 0
+        
+        while steps < max_steps:
+            nx += dx
+            ny += dy
+            steps += 1
+            
+            if not (0 <= nx < self.size and 0 <= ny < self.size):
+                break  # Hit edge
+                
+            cell = self.get_hex([nx, ny])
+            if cell == self.player_number:
+                path_score += 3  # Own piece
+            elif cell == 0:
+                path_score += 1  # Empty space
+            else:
+                path_score -= 5  # Opponent piece (bad for path)
+                break
+                
+        return max(0, path_score)  # Don't return negative scores
+    
+    def _check_path_potential(self, move, is_horizontal):
+        """Check path potential with improved connectivity analysis"""
+        if is_horizontal:
+            # Analyze rightward path potential
+            x, y = move
+            path_value = 0
+            empty_count = 0
+            own_count = 0
+            
+            for ny in range(y+1, self.size):
+                cell = self.get_hex([x, ny])
+                if cell == self.player_number:
+                    own_count += 1
+                    path_value += 2
+                elif cell == 0:
+                    empty_count += 1
+                    path_value += 0.5
+                else:
+                    break  # Blocked
+            
+            # Bonus for mix of own pieces and open spaces (good path potential)
+            if own_count > 0 and empty_count > 0:
+                path_value += own_count * empty_count * 0.5
+                
+            return path_value
+        else:
+            # Analyze downward path potential
+            x, y = move
+            path_value = 0
+            empty_count = 0
+            own_count = 0
+            
+            for nx in range(x+1, self.size):
+                cell = self.get_hex([nx, y])
+                if cell == self.player_number:
+                    own_count += 1
+                    path_value += 2
+                elif cell == 0:
+                    empty_count += 1
+                    path_value += 0.5
+                else:
+                    break  # Blocked
+            
+            # Bonus for mix of own pieces and open spaces (good path potential)
+            if own_count > 0 and empty_count > 0:
+                path_value += own_count * empty_count * 0.5
+                
+            return path_value
 
     def update(self, move_other_player):
         """Update game state with opponent's move"""
